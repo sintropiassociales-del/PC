@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
 <title>Centro de Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -140,6 +142,19 @@
   .demo-tag{font-size:11px;color:var(--warn);font-weight:600;font-family:var(--mono)}
   .empty{padding:40px 18px;text-align:center;color:var(--fg-faint);font-size:14px}
 
+  /* Recomendaciones */
+  .reco-card{margin-bottom:16px}
+  .reco-list{display:flex;flex-direction:column;gap:10px}
+  .reco{display:flex;gap:11px;align-items:flex-start;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);font-size:13.5px;line-height:1.5}
+  .reco .ic{flex:none;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;margin-top:1px}
+  .reco.ok-r{border-left:4px solid var(--ok)} .reco.ok-r .ic{background:var(--ok)}
+  .reco.warn-r{border-left:4px solid var(--warn)} .reco.warn-r .ic{background:var(--warn)}
+  .reco.crit-r{border-left:4px solid var(--crit)} .reco.crit-r .ic{background:var(--crit)}
+  .reco b{font-weight:600}
+  .reco .sug{display:block;color:var(--fg-soft);margin-top:2px}
+  .anon-tag{font-size:11px;font-weight:600;color:var(--ok);background:var(--ok-bg);padding:2px 8px;border-radius:20px;vertical-align:middle;margin-left:6px}
+  .spark{display:inline-flex;align-items:flex-end;gap:2px;height:22px}
+  .spark i{width:5px;background:var(--accent-soft);border-radius:1px;opacity:.75;display:block;min-height:2px}
   @media (max-width:860px){
     .kpis{grid-template-columns:repeat(2,1fr)}
     .panels{grid-template-columns:1fr}
@@ -195,6 +210,28 @@
         <div class="legend" id="legend" style="flex:1;min-width:140px"></div>
       </div>
       <div class="bars" id="bars" style="margin-top:18px"></div>
+    </div>
+  </div>
+
+  <!-- Recomendaciones -->
+  <div class="card reco-card">
+    <h2>Recomendaciones y riesgos</h2>
+    <div class="reco-list" id="recoList"></div>
+  </div>
+
+  <!-- Visitas y permanencia -->
+  <div class="table-card" style="margin-bottom:16px">
+    <div class="table-head">
+      <h2>Visitas y permanencia <span class="anon-tag">anónimo</span></h2>
+      <span class="refresh-info">Requiere el kill-switch instalado en el sitio</span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Plataforma</th><th>Visitas hoy</th><th>Últimos 7 días</th><th>Permanencia prom.</th><th>Tendencia 7 días</th>
+        </tr></thead>
+        <tbody id="metricsBody"></tbody>
+      </table>
     </div>
   </div>
 
@@ -262,9 +299,13 @@
   var INTERVAL = parseInt(LS.get('pc_interval','20'),10) || 20;
   var UMBRAL   = 8000;              // se actualiza con lo que diga el backend
   var sitios   = [];
+  var metricas = [];               // [{fecha,sitio,visitas,tiempoTotal,muestras}]
   var usandoDemo = false;
   var lastLoad = 0;
   var timer=null, tick=null;
+
+  function hoyISO(){ return new Date().toISOString().slice(0,10); }
+  function diasAtras(n){ var d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().slice(0,10); }
 
   // ---- Datos de ejemplo (hasta que conectes el backend) ----
   var DEMO = [
@@ -273,6 +314,13 @@
     {nombre:'juego-tres-puertas', url:'https://…/juego', estado:'ON', codigo:0, tiempo:0, fallos:4, ultimoCheck:new Date(Date.now()-2*60000).toISOString(), notas:'En mantenimiento'},
     {nombre:'fotoestudio', url:'https://fotoestudioaus-sys.github.io/', estado:'OFF', codigo:200, tiempo:710, fallos:0, ultimoCheck:new Date(Date.now()-7*60000).toISOString(), notas:'Pausado temporalmente'}
   ];
+  var DEMO_METRICAS = (function(){
+    var out=[], sitios=['sitio-principal','observatorio','juego-tres-puertas'];
+    for(var d=6;d>=0;d--){ var f=diasAtras(d);
+      sitios.forEach(function(s,i){ out.push({fecha:f, sitio:s, visitas:Math.round(8+Math.random()*30+i*4), tiempoTotal:Math.round((40000+Math.random()*60000)), muestras:Math.round(6+Math.random()*20)}); });
+    }
+    return out;
+  })();
 
   // ---------- Clasificación de estado/riesgo ----------
   function clasificar(s){
@@ -312,6 +360,8 @@
     renderDonut(c);
     renderBars();
     renderTable();
+    renderReco();
+    renderMetrics();
     document.getElementById('demoBanner').hidden = !usandoDemo;
   }
 
@@ -429,10 +479,89 @@
     });
   }
 
+  // ---------- Recomendaciones (reglas sobre los datos) ----------
+  function renderReco(){
+    var box=document.getElementById('recoList'); box.innerHTML='';
+    if(!sitios.length){ box.innerHTML='<div style="color:var(--fg-faint);font-size:13px">Agrega plataformas para recibir recomendaciones.</div>'; return; }
+    var items=[];
+    sitios.forEach(function(s){
+      var cl=clasificar(s);
+      if(cl==='crit'){
+        var porQue = (s.codigo===0) ? 'no responde (sin conexión)' : ('devuelve error '+s.codigo);
+        items.push({sev:3, nombre:s.nombre, txt:'<b>'+esc(s.nombre)+'</b> '+porQue+(s.fallos>1?' · '+s.fallos+' revisiones fallidas seguidas':'')+'.',
+          sug: s.codigo===404 ? 'Revisa que la URL sea correcta y que el sitio esté publicado (GitHub Pages activo).' : 'Revisa el despliegue del sitio o su conexión; si es intencional, apágalo para silenciar alertas.'});
+      } else if(cl==='warn'){
+        items.push({sev:2, nombre:s.nombre, txt:'<b>'+esc(s.nombre)+'</b> responde lento ('+s.tiempo+' ms, arriba del umbral de '+UMBRAL+' ms).',
+          sug:'Revisa el peso de imágenes y scripts, o si el servidor va saturado. Un sitio lento espanta visitas.'});
+      } else if(cl==='off'){
+        items.push({sev:1, nombre:s.nombre, txt:'<b>'+esc(s.nombre)+'</b> está apagado (mostrando mantenimiento a los visitantes).',
+          sug:'Enciéndelo cuando quieras reactivarlo; mientras tanto no recibe tráfico real.'});
+      }
+    });
+    items.sort(function(a,b){ return b.sev-a.sev; });
+    if(!items.length){
+      box.appendChild(reco(1,'ok-r','✓','<b>Todo en orden.</b> Ninguna plataforma presenta caídas, lentitud ni fallos.',''));
+      return;
+    }
+    items.forEach(function(it){
+      var cls = it.sev>=3?'crit-r':it.sev===2?'warn-r':'ok-r';
+      var ic  = it.sev>=3?'!':it.sev===2?'▲':'■';
+      box.appendChild(reco(it.sev, cls, ic, it.txt, it.sug));
+    });
+  }
+  function reco(sev, cls, ic, txt, sug){
+    var el=document.createElement('div'); el.className='reco '+cls;
+    el.innerHTML='<span class="ic">'+ic+'</span><span>'+txt+(sug?'<span class="sug">'+esc(sug)+'</span>':'')+'</span>';
+    return el;
+  }
+
+  // ---------- Visitas y permanencia ----------
+  function renderMetrics(){
+    var tb=document.getElementById('metricsBody'); tb.innerHTML='';
+    var hoy=hoyISO(), hace7=diasAtras(6);
+    // Agregamos por sitio
+    var porSitio={};
+    metricas.forEach(function(m){
+      if(m.fecha < hace7) return;
+      var k=m.sitio; if(!porSitio[k]) porSitio[k]={hoy:0, semana:0, tTotal:0, muestras:0, dias:{}};
+      porSitio[k].semana += m.visitas;
+      porSitio[k].tTotal += m.tiempoTotal||0;
+      porSitio[k].muestras += m.muestras||0;
+      porSitio[k].dias[m.fecha] = (porSitio[k].dias[m.fecha]||0) + m.visitas;
+      if(m.fecha===hoy) porSitio[k].hoy += m.visitas;
+    });
+    var nombres=Object.keys(porSitio);
+    if(!nombres.length){
+      tb.innerHTML='<tr><td colspan="5" class="empty">Aún no hay visitas registradas. Se registran cuando el kill-switch está instalado en el sitio y alguien lo abre.</td></tr>';
+      return;
+    }
+    nombres.sort(function(a,b){ return porSitio[b].semana-porSitio[a].semana; });
+    nombres.forEach(function(k){
+      var d=porSitio[k];
+      var prom = d.muestras ? Math.round(d.tTotal/d.muestras/1000) : null; // segundos
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td class="site-nm">'+esc(k)+(usandoDemo?' <span class="demo-tag">ej.</span>':'')+'</td>'+
+        '<td class="num">'+d.hoy+'</td>'+
+        '<td class="num">'+d.semana+'</td>'+
+        '<td class="num">'+(prom===null?'—':(prom<60?prom+' s':Math.floor(prom/60)+' m '+(prom%60)+' s'))+'</td>'+
+        '<td>'+spark(d.dias)+'</td>';
+      tb.appendChild(tr);
+    });
+  }
+  function spark(dias){
+    var vals=[]; for(var i=6;i>=0;i--){ vals.push(dias[diasAtras(i)]||0); }
+    var max=Math.max.apply(null, vals.concat([1]));
+    return '<span class="spark">'+vals.map(function(v){ return '<i style="height:'+Math.round(2+v/max*20)+'px" title="'+v+' visitas"></i>'; }).join('')+'</span>';
+  }
+
   // ---------- Red ----------
   function api(action){
     return fetch(ENDPOINT+'?action='+action+'&token='+encodeURIComponent(TOKEN))
       .then(function(r){ return r.json(); });
+  }
+  function apiMetricas(){
+    return fetch(ENDPOINT+'?action=metrics&token='+encodeURIComponent(TOKEN))
+      .then(function(r){ return r.json(); }).catch(function(){ return null; });
   }
   function post(body){
     body.token=TOKEN;
@@ -441,17 +570,18 @@
   }
 
   function cargar(){
-    if(!ENDPOINT || !TOKEN){ usandoDemo=true; sitios=DEMO.slice(); render(); setInfo(); return; }
+    if(!ENDPOINT || !TOKEN){ usandoDemo=true; sitios=DEMO.slice(); metricas=DEMO_METRICAS.slice(); render(); setInfo(); return; }
     api('list').then(function(res){
       if(res && res.ok){
         usandoDemo=false; sitios=res.sitios||[]; if(res.umbral) UMBRAL=res.umbral;
+        apiMetricas().then(function(m){ metricas=(m&&m.ok&&m.metricas)?m.metricas:[]; render(); });
       } else {
-        usandoDemo=true; sitios=DEMO.slice();
+        usandoDemo=true; sitios=DEMO.slice(); metricas=DEMO_METRICAS.slice();
         if(res && res.error==='token') toast('Token incorrecto — revisa ⚙ Configurar');
       }
       lastLoad=Date.now(); render(); setInfo();
     }).catch(function(){
-      usandoDemo=true; sitios=DEMO.slice(); render(); setInfo();
+      usandoDemo=true; sitios=DEMO.slice(); metricas=DEMO_METRICAS.slice(); render(); setInfo();
       toast('No se pudo conectar al backend');
     });
   }
