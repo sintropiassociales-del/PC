@@ -105,7 +105,10 @@
   td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
   tr:last-child td{border-bottom:none}
   .site-nm{font-weight:600}
-  .site-url{font-size:12px;color:var(--fg-faint);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+  .site-url{font-size:12px;color:var(--fg-faint);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px;display:block}
+  a.site-url.link{color:var(--accent-soft);text-decoration:none}
+  a.site-url.link:hover{text-decoration:underline}
+  a.icon-btn{text-decoration:none}
   .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap}
   .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
   .p-ok{color:var(--ok);background:var(--ok-bg)} .p-warn{color:var(--warn);background:var(--warn-bg)}
@@ -251,7 +254,7 @@
       </table>
     </div>
     <form class="addbar" id="addForm">
-      <input id="addNombre" placeholder="id-plataforma" required pattern="[a-z0-9\-]+" title="minúsculas, números y guiones" autocomplete="off">
+      <input id="addNombre" placeholder="id-plataforma" required pattern="[A-Za-z0-9_\-]+" title="letras, números, guiones y guión bajo (sin espacios)" autocomplete="off">
       <input id="addUrl" type="url" placeholder="https://…" required autocomplete="off">
       <input id="addNotas" placeholder="Mensaje de mantenimiento (opcional)" autocomplete="off">
       <button class="btn primary" type="submit">+ Agregar</button>
@@ -451,8 +454,13 @@
       var tCls = s.tiempo>UMBRAL?'t-warn':(s.tiempo>0?'t-ok':'');
       var fallCls = s.fallos>=3?'t-crit':(s.fallos>0?'t-warn':'');
 
+      var urlOk = /^https?:\/\//i.test(s.url||'');
+      var urlHtml = urlOk
+        ? '<a class="site-url link" href="'+esc(s.url)+'" target="_blank" rel="noopener noreferrer" title="Abrir '+esc(s.url)+'">'+esc(s.url)+' ↗</a>'
+        : '<div class="site-url" title="'+esc(s.url)+'">'+esc(s.url||'—')+'</div>';
+
       tr.innerHTML=
-        '<td><div class="site-nm">'+esc(s.nombre)+(usandoDemo?' <span class="demo-tag">ej.</span>':'')+'</div><div class="site-url" title="'+esc(s.url)+'">'+esc(s.url||'')+'</div></td>'+
+        '<td><div class="site-nm">'+esc(s.nombre)+(usandoDemo?' <span class="demo-tag">ej.</span>':'')+'</div>'+urlHtml+'</td>'+
         '<td></td>'+
         '<td><span class="pill '+m.cls+'">'+m.txt+'</span></td>'+
         '<td class="num '+codCls+'">'+codTxt+'</td>'+
@@ -469,6 +477,11 @@
 
       // Actions
       var act=tr.querySelector('.row-actions');
+      if(urlOk){
+        var open=document.createElement('a'); open.className='icon-btn'; open.textContent='↗'; open.title='Abrir el sitio';
+        open.href=s.url; open.target='_blank'; open.rel='noopener noreferrer';
+        act.appendChild(open);
+      }
       var edit=document.createElement('button'); edit.className='icon-btn'; edit.textContent='✎'; edit.title='Editar notas/URL';
       edit.onclick=function(){ editar(s); };
       var del=document.createElement('button'); del.className='icon-btn danger'; del.textContent='🗑'; del.title='Eliminar';
